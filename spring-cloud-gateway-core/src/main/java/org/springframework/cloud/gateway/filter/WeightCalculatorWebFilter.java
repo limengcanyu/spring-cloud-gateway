@@ -33,13 +33,12 @@ import org.springframework.cloud.gateway.event.PredicateArgsEvent;
 import org.springframework.cloud.gateway.event.RefreshRoutesEvent;
 import org.springframework.cloud.gateway.event.WeightDefinedEvent;
 import org.springframework.cloud.gateway.route.RouteLocator;
-import org.springframework.cloud.gateway.support.ConfigurationUtils;
+import org.springframework.cloud.gateway.support.ConfigurationService;
 import org.springframework.cloud.gateway.support.WeightConfig;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.event.SmartApplicationListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.style.ToStringCreator;
-import org.springframework.validation.Validator;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
@@ -48,6 +47,7 @@ import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.W
 
 /**
  * @author Spencer Gibb
+ * @author Alexey Nakidkin
  */
 public class WeightCalculatorWebFilter
 		implements WebFilter, Ordered, SmartApplicationListener {
@@ -59,9 +59,9 @@ public class WeightCalculatorWebFilter
 
 	private static final Log log = LogFactory.getLog(WeightCalculatorWebFilter.class);
 
-	private final Validator validator;
-
 	private final ObjectProvider<RouteLocator> routeLocator;
+
+	private final ConfigurationService configurationService;
 
 	private Random random = new Random();
 
@@ -69,19 +69,10 @@ public class WeightCalculatorWebFilter
 
 	private Map<String, GroupWeightConfig> groupWeights = new ConcurrentHashMap<>();
 
-	/* for testing */ WeightCalculatorWebFilter() {
-		this(null, null);
-	}
-
-	@Deprecated
-	public WeightCalculatorWebFilter(Validator validator) {
-		this(validator, null);
-	}
-
-	public WeightCalculatorWebFilter(Validator validator,
-			ObjectProvider<RouteLocator> routeLocator) {
-		this.validator = validator;
+	public WeightCalculatorWebFilter(ObjectProvider<RouteLocator> routeLocator,
+			ConfigurationService configurationService) {
 		this.routeLocator = routeLocator;
+		this.configurationService = configurationService;
 	}
 
 	/* for testing */
@@ -110,10 +101,12 @@ public class WeightCalculatorWebFilter
 
 	@Override
 	public boolean supportsEventType(Class<? extends ApplicationEvent> eventType) {
-		return PredicateArgsEvent.class.isAssignableFrom(eventType) || // config file
-				WeightDefinedEvent.class.isAssignableFrom(eventType) || // java dsl
-				RefreshRoutesEvent.class.isAssignableFrom(eventType); // force
-																		// initialization
+		// from config file
+		return PredicateArgsEvent.class.isAssignableFrom(eventType) ||
+		// from java dsl
+				WeightDefinedEvent.class.isAssignableFrom(eventType) ||
+				// force initialization
+				RefreshRoutesEvent.class.isAssignableFrom(eventType);
 	}
 
 	@Override
@@ -130,8 +123,8 @@ public class WeightCalculatorWebFilter
 			addWeightConfig(((WeightDefinedEvent) event).getWeightConfig());
 		}
 		else if (event instanceof RefreshRoutesEvent && routeLocator != null) {
-			routeLocator.ifAvailable(locator -> locator.getRoutes().subscribe()); // forces
-																					// initialization
+			// forces initialization
+			routeLocator.ifAvailable(locator -> locator.getRoutes().subscribe());
 		}
 
 	}
@@ -145,8 +138,8 @@ public class WeightCalculatorWebFilter
 
 		WeightConfig config = new WeightConfig(event.getRouteId());
 
-		ConfigurationUtils.bind(config, args, WeightConfig.CONFIG_PREFIX,
-				WeightConfig.CONFIG_PREFIX, validator);
+		this.configurationService.with(config).name(WeightConfig.CONFIG_PREFIX)
+				.normalizedProperties(args).bind();
 
 		addWeightConfig(config);
 	}
@@ -158,28 +151,38 @@ public class WeightCalculatorWebFilter
 
 	/* for testing */ void addWeightConfig(WeightConfig weightConfig) {
 		String group = weightConfig.getGroup();
-		GroupWeightConfig c = groupWeights.get(group);
-		if (c == null) {
-			c = new GroupWeightConfig(group);
-			groupWeights.put(group, c);
+		GroupWeightConfig config;
+		// only create new GroupWeightConfig rather than modify
+		// and put at end of calculations. This avoids concurency problems
+		// later during filter execution.
+		if (groupWeights.containsKey(group)) {
+			config = new GroupWeightConfig(groupWeights.get(group));
 		}
-		GroupWeightConfig config = c;
+		else {
+			config = new GroupWeightConfig(group);
+		}
+
 		config.weights.put(weightConfig.getRouteId(), weightConfig.getWeight());
 
 		// recalculate
 
 		// normalize weights
-		int weightsSum = config.weights.values().stream().mapToInt(Integer::intValue)
-				.sum();
+		int weightsSum = 0;
+
+		for (Integer weight : config.weights.values()) {
+			weightsSum += weight;
+		}
 
 		final AtomicInteger index = new AtomicInteger(0);
-		config.weights.forEach((routeId, weight) -> {
+		for (Map.Entry<String, Integer> entry : config.weights.entrySet()) {
+			String routeId = entry.getKey();
+			Integer weight = entry.getValue();
 			Double nomalizedWeight = weight / (double) weightsSum;
 			config.normalizedWeights.put(routeId, nomalizedWeight);
 
 			// recalculate rangeIndexes
 			config.rangeIndexes.put(index.getAndIncrement(), routeId);
-		});
+		}
 
 		// TODO: calculate ranges
 		config.ranges.clear();
@@ -197,6 +200,8 @@ public class WeightCalculatorWebFilter
 		if (log.isTraceEnabled()) {
 			log.trace("Recalculated group weight config " + config);
 		}
+		// only update after all calculations
+		groupWeights.put(group, config);
 	}
 
 	/* for testing */ Map<String, GroupWeightConfig> getGroupWeights() {
@@ -256,6 +261,13 @@ public class WeightCalculatorWebFilter
 
 		GroupWeightConfig(String group) {
 			this.group = group;
+		}
+
+		GroupWeightConfig(GroupWeightConfig other) {
+			this.group = other.group;
+			this.weights = new LinkedHashMap<>(other.weights);
+			this.normalizedWeights = new LinkedHashMap<>(other.normalizedWeights);
+			this.rangeIndexes = new LinkedHashMap<>(other.rangeIndexes);
 		}
 
 		@Override

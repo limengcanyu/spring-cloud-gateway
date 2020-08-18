@@ -26,7 +26,6 @@ import java.util.function.Predicate;
 import org.springframework.cloud.gateway.support.ServerWebExchangeUtils;
 import org.springframework.core.style.ToStringCreator;
 import org.springframework.util.AntPathMatcher;
-import org.springframework.util.CollectionUtils;
 import org.springframework.util.PathMatcher;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.server.ServerWebExchange;
@@ -59,19 +58,27 @@ public class HostRoutePredicateFactory
 
 	@Override
 	public Predicate<ServerWebExchange> apply(Config config) {
-		return exchange -> {
-			String host = exchange.getRequest().getHeaders().getFirst("Host");
-			Optional<String> optionalPattern = config.getPatterns().stream()
-					.filter(pattern -> this.pathMatcher.match(pattern, host)).findFirst();
+		return new GatewayPredicate() {
+			@Override
+			public boolean test(ServerWebExchange exchange) {
+				String host = exchange.getRequest().getHeaders().getFirst("Host");
+				Optional<String> optionalPattern = config.getPatterns().stream()
+						.filter(pattern -> pathMatcher.match(pattern, host)).findFirst();
 
-			if (optionalPattern.isPresent()) {
-				Map<String, String> variables = this.pathMatcher
-						.extractUriTemplateVariables(optionalPattern.get(), host);
-				ServerWebExchangeUtils.putUriTemplateVariables(exchange, variables);
-				return true;
+				if (optionalPattern.isPresent()) {
+					Map<String, String> variables = pathMatcher
+							.extractUriTemplateVariables(optionalPattern.get(), host);
+					ServerWebExchangeUtils.putUriTemplateVariables(exchange, variables);
+					return true;
+				}
+
+				return false;
 			}
 
-			return false;
+			@Override
+			public String toString() {
+				return String.format("Hosts: %s", config.getPatterns());
+			}
 		};
 	}
 
@@ -80,27 +87,13 @@ public class HostRoutePredicateFactory
 
 		private List<String> patterns = new ArrayList<>();
 
-		@Deprecated
-		public String getPattern() {
-			if (!CollectionUtils.isEmpty(this.patterns)) {
-				return patterns.get(0);
-			}
-			return null;
-		}
-
-		@Deprecated
-		public Config setPattern(String pattern) {
-			this.patterns = new ArrayList<>();
-			this.patterns.add(pattern);
-			return this;
-		}
-
 		public List<String> getPatterns() {
 			return patterns;
 		}
 
-		public void setPatterns(List<String> patterns) {
+		public Config setPatterns(List<String> patterns) {
 			this.patterns = patterns;
+			return this;
 		}
 
 		@Override

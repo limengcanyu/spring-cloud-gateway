@@ -21,16 +21,11 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import reactor.core.publisher.Flux;
 
-import org.springframework.beans.BeansException;
-import org.springframework.beans.factory.BeanFactory;
-import org.springframework.beans.factory.BeanFactoryAware;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.config.GatewayProperties;
 import org.springframework.cloud.gateway.event.FilterArgsEvent;
 import org.springframework.cloud.gateway.event.PredicateArgsEvent;
@@ -41,14 +36,10 @@ import org.springframework.cloud.gateway.filter.factory.GatewayFilterFactory;
 import org.springframework.cloud.gateway.handler.AsyncPredicate;
 import org.springframework.cloud.gateway.handler.predicate.PredicateDefinition;
 import org.springframework.cloud.gateway.handler.predicate.RoutePredicateFactory;
-import org.springframework.cloud.gateway.support.ConfigurationUtils;
-import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.ApplicationEventPublisherAware;
+import org.springframework.cloud.gateway.support.ConfigurationService;
+import org.springframework.cloud.gateway.support.HasRouteId;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
-import org.springframework.core.convert.ConversionService;
-import org.springframework.expression.spel.standard.SpelExpressionParser;
-import org.springframework.validation.Validator;
 import org.springframework.web.server.ServerWebExchange;
 
 /**
@@ -56,8 +47,7 @@ import org.springframework.web.server.ServerWebExchange;
  *
  * @author Spencer Gibb
  */
-public class RouteDefinitionRouteLocator
-		implements RouteLocator, BeanFactoryAware, ApplicationEventPublisherAware {
+public class RouteDefinitionRouteLocator implements RouteLocator {
 
 	/**
 	 * Default filters name.
@@ -68,7 +58,7 @@ public class RouteDefinitionRouteLocator
 
 	private final RouteDefinitionLocator routeDefinitionLocator;
 
-	private final ConversionService conversionService;
+	private final ConfigurationService configurationService;
 
 	private final Map<String, RoutePredicateFactory> predicates = new LinkedHashMap<>();
 
@@ -76,35 +66,17 @@ public class RouteDefinitionRouteLocator
 
 	private final GatewayProperties gatewayProperties;
 
-	private final SpelExpressionParser parser = new SpelExpressionParser();
-
-	private BeanFactory beanFactory;
-
-	private ApplicationEventPublisher publisher;
-
-	@Autowired
-	private Validator validator;
-
 	public RouteDefinitionRouteLocator(RouteDefinitionLocator routeDefinitionLocator,
 			List<RoutePredicateFactory> predicates,
 			List<GatewayFilterFactory> gatewayFilterFactories,
-			GatewayProperties gatewayProperties, ConversionService conversionService) {
+			GatewayProperties gatewayProperties,
+			ConfigurationService configurationService) {
 		this.routeDefinitionLocator = routeDefinitionLocator;
-		this.conversionService = conversionService;
+		this.configurationService = configurationService;
 		initFactories(predicates);
 		gatewayFilterFactories.forEach(
 				factory -> this.gatewayFilterFactories.put(factory.name(), factory));
 		this.gatewayProperties = gatewayProperties;
-	}
-
-	@Override
-	public void setBeanFactory(BeanFactory beanFactory) throws BeansException {
-		this.beanFactory = beanFactory;
-	}
-
-	@Override
-	public void setApplicationEventPublisher(ApplicationEventPublisher publisher) {
-		this.publisher = publisher;
 	}
 
 	private void initFactories(List<RoutePredicateFactory> predicates) {
@@ -124,19 +96,26 @@ public class RouteDefinitionRouteLocator
 
 	@Override
 	public Flux<Route> getRoutes() {
-		return this.routeDefinitionLocator.getRouteDefinitions().map(this::convertToRoute)
-				// TODO: error handling
-				.map(route -> {
-					if (logger.isDebugEnabled()) {
-						logger.debug("RouteDefinition matched: " + route.getId());
-					}
-					return route;
-				});
+		Flux<Route> routes = this.routeDefinitionLocator.getRouteDefinitions()
+				.map(this::convertToRoute);
 
-		/*
-		 * TODO: trace logging if (logger.isTraceEnabled()) {
-		 * logger.trace("RouteDefinition did not match: " + routeDefinition.getId()); }
-		 */
+		if (!gatewayProperties.isFailOnRouteDefinitionError()) {
+			// instead of letting error bubble up, continue
+			routes = routes.onErrorContinue((error, obj) -> {
+				if (logger.isWarnEnabled()) {
+					logger.warn("RouteDefinition id " + ((RouteDefinition) obj).getId()
+							+ " will be ignored. Definition has invalid configs, "
+							+ error.getMessage());
+				}
+			});
+		}
+
+		return routes.map(route -> {
+			if (logger.isDebugEnabled()) {
+				logger.debug("RouteDefinition matched: " + route.getId());
+			}
+			return route;
+		});
 	}
 
 	private Route convertToRoute(RouteDefinition routeDefinition) {
@@ -148,9 +127,11 @@ public class RouteDefinitionRouteLocator
 	}
 
 	@SuppressWarnings("unchecked")
-	private List<GatewayFilter> loadGatewayFilters(String id,
+	List<GatewayFilter> loadGatewayFilters(String id,
 			List<FilterDefinition> filterDefinitions) {
-		List<GatewayFilter> filters = filterDefinitions.stream().map(definition -> {
+		ArrayList<GatewayFilter> ordered = new ArrayList<>(filterDefinitions.size());
+		for (int i = 0; i < filterDefinitions.size(); i++) {
+			FilterDefinition definition = filterDefinitions.get(i);
 			GatewayFilterFactory factory = this.gatewayFilterFactories
 					.get(definition.getName());
 			if (factory == null) {
@@ -158,31 +139,29 @@ public class RouteDefinitionRouteLocator
 						"Unable to find GatewayFilterFactory with name "
 								+ definition.getName());
 			}
-			Map<String, String> args = definition.getArgs();
 			if (logger.isDebugEnabled()) {
-				logger.debug("RouteDefinition " + id + " applying filter " + args + " to "
-						+ definition.getName());
+				logger.debug("RouteDefinition " + id + " applying filter "
+						+ definition.getArgs() + " to " + definition.getName());
 			}
 
-			Map<String, Object> properties = factory.shortcutType().normalize(args,
-					factory, this.parser, this.beanFactory);
+			// @formatter:off
+			Object configuration = this.configurationService.with(factory)
+					.name(definition.getName())
+					.properties(definition.getArgs())
+					.eventFunction((bound, properties) -> new FilterArgsEvent(
+							// TODO: why explicit cast needed or java compile fails
+							RouteDefinitionRouteLocator.this, id, (Map<String, Object>) properties))
+					.bind();
+			// @formatter:on
 
-			Object configuration = factory.newConfig();
-
-			ConfigurationUtils.bind(configuration, properties,
-					factory.shortcutFieldPrefix(), definition.getName(), validator,
-					conversionService);
+			// some filters require routeId
+			// TODO: is there a better place to apply this?
+			if (configuration instanceof HasRouteId) {
+				HasRouteId hasRouteId = (HasRouteId) configuration;
+				hasRouteId.setRouteId(id);
+			}
 
 			GatewayFilter gatewayFilter = factory.apply(configuration);
-			if (this.publisher != null) {
-				this.publisher.publishEvent(new FilterArgsEvent(this, id, properties));
-			}
-			return gatewayFilter;
-		}).collect(Collectors.toList());
-
-		ArrayList<GatewayFilter> ordered = new ArrayList<>(filters.size());
-		for (int i = 0; i < filters.size(); i++) {
-			GatewayFilter gatewayFilter = filters.get(i);
 			if (gatewayFilter instanceof Ordered) {
 				ordered.add(gatewayFilter);
 			}
@@ -200,12 +179,12 @@ public class RouteDefinitionRouteLocator
 		// TODO: support option to apply defaults after route specific filters?
 		if (!this.gatewayProperties.getDefaultFilters().isEmpty()) {
 			filters.addAll(loadGatewayFilters(DEFAULT_FILTERS,
-					this.gatewayProperties.getDefaultFilters()));
+					new ArrayList<>(this.gatewayProperties.getDefaultFilters())));
 		}
 
 		if (!routeDefinition.getFilters().isEmpty()) {
 			filters.addAll(loadGatewayFilters(routeDefinition.getId(),
-					routeDefinition.getFilters()));
+					new ArrayList<>(routeDefinition.getFilters())));
 		}
 
 		AnnotationAwareOrderComparator.sort(filters);
@@ -237,21 +216,20 @@ public class RouteDefinitionRouteLocator
 					"Unable to find RoutePredicateFactory with name "
 							+ predicate.getName());
 		}
-		Map<String, String> args = predicate.getArgs();
 		if (logger.isDebugEnabled()) {
-			logger.debug("RouteDefinition " + route.getId() + " applying " + args + " to "
-					+ predicate.getName());
+			logger.debug("RouteDefinition " + route.getId() + " applying "
+					+ predicate.getArgs() + " to " + predicate.getName());
 		}
 
-		Map<String, Object> properties = factory.shortcutType().normalize(args, factory,
-				this.parser, this.beanFactory);
-		Object config = factory.newConfig();
-		ConfigurationUtils.bind(config, properties, factory.shortcutFieldPrefix(),
-				predicate.getName(), validator, conversionService);
-		if (this.publisher != null) {
-			this.publisher.publishEvent(
-					new PredicateArgsEvent(this, route.getId(), properties));
-		}
+		// @formatter:off
+		Object config = this.configurationService.with(factory)
+				.name(predicate.getName())
+				.properties(predicate.getArgs())
+				.eventFunction((bound, properties) -> new PredicateArgsEvent(
+						RouteDefinitionRouteLocator.this, route.getId(), properties))
+				.bind();
+		// @formatter:on
+
 		return factory.applyAsync(config);
 	}
 

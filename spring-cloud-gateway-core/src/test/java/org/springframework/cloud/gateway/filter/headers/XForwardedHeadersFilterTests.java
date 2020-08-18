@@ -195,6 +195,35 @@ public class XForwardedHeadersFilterTests {
 	}
 
 	@Test
+	public void prefixToInferWhenEqualsResource() throws Exception {
+		MockServerHttpRequest request = MockServerHttpRequest
+				.get("https://originalhost:8080/resource/resource/")
+				.remoteAddress(
+						new InetSocketAddress(InetAddress.getByName("10.0.0.1"), 80))
+				.build();
+
+		XForwardedHeadersFilter filter = new XForwardedHeadersFilter();
+		filter.setPrefixAppend(true);
+		filter.setPrefixEnabled(true);
+
+		ServerWebExchange exchange = MockServerWebExchange.from(request);
+		LinkedHashSet<URI> originalUris = new LinkedHashSet<>();
+		originalUris.add(UriComponentsBuilder
+				.fromUriString("https://originalhost:8080/resource/resource/").build()
+				.toUri()); // trailing slash
+		exchange.getAttributes().put(GATEWAY_ORIGINAL_REQUEST_URL_ATTR, originalUris);
+		URI requestUri = UriComponentsBuilder
+				.fromUriString("https://routedservice:8090/resource").build().toUri();
+		exchange.getAttributes().put(GATEWAY_REQUEST_URL_ATTR, requestUri);
+
+		HttpHeaders headers = filter.filter(request.getHeaders(), exchange);
+
+		assertThat(headers).containsKeys(X_FORWARDED_PREFIX_HEADER);
+
+		assertThat(headers.getFirst(X_FORWARDED_PREFIX_HEADER)).isEqualTo("/resource");
+	}
+
+	@Test
 	public void prefixAddedWithoutTrailingSlash() throws Exception {
 		MockServerHttpRequest request = MockServerHttpRequest
 				.get("https://originalhost:8080/foo/bar")
@@ -300,6 +329,25 @@ public class XForwardedHeadersFilterTests {
 				MockServerWebExchange.from(request));
 
 		assertThat(headers).isEmpty();
+	}
+
+	@Test
+	public void allowDuplicateEntriesInXForwardedForHeader() throws Exception {
+		MockServerHttpRequest request = MockServerHttpRequest
+				.get("http://localhost:8080/get")
+				.remoteAddress(
+						new InetSocketAddress(InetAddress.getByName("10.0.0.1"), 80))
+				.header(X_FORWARDED_FOR_HEADER, "10.0.0.1").build();
+
+		XForwardedHeadersFilter filter = new XForwardedHeadersFilter();
+
+		HttpHeaders headers = filter.filter(request.getHeaders(),
+				MockServerWebExchange.from(request));
+
+		assertThat(headers).containsKeys(X_FORWARDED_FOR_HEADER);
+
+		assertThat(headers.getFirst(X_FORWARDED_FOR_HEADER))
+				.isEqualTo("10.0.0.1,10.0.0.1");
 	}
 
 }

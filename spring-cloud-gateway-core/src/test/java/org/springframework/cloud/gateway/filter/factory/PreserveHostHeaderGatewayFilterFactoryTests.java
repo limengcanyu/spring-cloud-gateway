@@ -16,6 +16,7 @@
 
 package org.springframework.cloud.gateway.filter.factory;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.Test;
@@ -25,6 +26,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.cloud.gateway.test.BaseWebClientTests;
@@ -45,15 +47,24 @@ import static org.springframework.cloud.gateway.test.TestUtils.getMap;
 @DirtiesContext
 public class PreserveHostHeaderGatewayFilterFactoryTests extends BaseWebClientTests {
 
+	@SuppressWarnings("unchecked")
 	@Test
 	public void preserveHostHeaderGatewayFilterFactoryWorks() {
-		testClient.get().uri("/headers").header("Host", "www.preservehostheader.org")
-				.exchange().expectStatus().isOk().expectBody(Map.class)
-				.consumeWith(result -> {
+		testClient.get().uri("/multivalueheaders")
+				.header("Host", "www.preservehostheader.org").exchange().expectStatus()
+				.isOk().expectBody(Map.class).consumeWith(result -> {
 					Map<String, Object> headers = getMap(result.getResponseBody(),
 							"headers");
-					assertThat(headers).containsEntry("Host", "myhost.net");
+					assertThat(headers).containsKey("Host");
+					List<String> values = (List<String>) headers.get("Host");
+					assertThat(values).containsExactly("myhost.net");
 				});
+	}
+
+	@Test
+	public void toStringFormat() {
+		GatewayFilter filter = new PreserveHostHeaderGatewayFilterFactory().apply();
+		assertThat(filter.toString()).contains("PreserveHostHeader");
 	}
 
 	@EnableAutoConfiguration

@@ -16,19 +16,19 @@
 
 package org.springframework.cloud.gateway.route;
 
-import org.junit.Rule;
+import java.net.URI;
+import java.util.HashMap;
+
+import org.assertj.core.util.Maps;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class RouteTests {
 
-	@Rule
-	public ExpectedException exception = ExpectedException.none();
-
 	@Test
-	public void defeaultHttpPort() {
+	public void defaultHttpPort() {
 		Route route = Route.async().id("1").predicate(exchange -> true)
 				.uri("http://acme.com").build();
 
@@ -36,7 +36,7 @@ public class RouteTests {
 	}
 
 	@Test
-	public void defeaultHttpsPort() {
+	public void defaultHttpsPort() {
 		Route route = Route.async().id("1").predicate(exchange -> true)
 				.uri("https://acme.com").build();
 
@@ -53,8 +53,42 @@ public class RouteTests {
 
 	@Test
 	public void nullScheme() {
-		exception.expect(IllegalArgumentException.class);
-		Route.async().id("1").predicate(exchange -> true).uri("/pathonly");
+		assertThatThrownBy(
+				() -> Route.async().id("1").predicate(exchange -> true).uri("/pathonly"))
+						.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	public void defaultMetadataToEmpty() {
+		Route route = Route.async().id("1").predicate(exchange -> true)
+				.uri("http://acme.com:8080").build();
+
+		assertThat(route.getMetadata()).isEmpty();
+	}
+
+	@Test
+	public void isAbleToAddMetadata() {
+		Route route = Route.async().id("1").predicate(exchange -> true)
+				.uri("http://acme.com:8080").metadata(Maps.newHashMap("key", "value"))
+				.metadata("key2", "value2").build();
+
+		assertThat(route.getMetadata()).hasSize(2).containsEntry("key", "value")
+				.containsEntry("key2", "value2");
+	}
+
+	@Test
+	public void metadataIsAddedFromDefinition() {
+		RouteDefinition definition = new RouteDefinition();
+		definition.setId("1");
+		definition.setUri(URI.create("http://acme.com:8080"));
+		HashMap<String, Object> metadata = new HashMap<>();
+		metadata.put("key", "value");
+		metadata.put("key2", "value2");
+		definition.setMetadata(metadata);
+		Route route = Route.async(definition).predicate(exchange -> true).build();
+
+		assertThat(route.getMetadata()).hasSize(2).containsEntry("key", "value")
+				.containsEntry("key2", "value2");
 	}
 
 }

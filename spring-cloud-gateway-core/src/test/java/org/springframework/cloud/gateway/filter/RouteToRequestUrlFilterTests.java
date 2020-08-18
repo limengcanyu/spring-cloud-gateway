@@ -22,6 +22,7 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
+import org.springframework.boot.SpringBootVersion;
 import org.springframework.cloud.gateway.route.Route;
 import org.springframework.http.HttpMethod;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
@@ -30,6 +31,7 @@ import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assume.assumeTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR;
@@ -116,6 +118,9 @@ public class RouteToRequestUrlFilterTests {
 
 	@Test
 	public void partialEncodedParameters() {
+		assumeTrue("partialEncodedParameters ignored for boot 2.2",
+				SpringBootVersion.getVersion().startsWith("2.3."));
+
 		URI url = UriComponentsBuilder
 				.fromUriString("http://localhost/get?key[]=test= key&start=1533108081")
 				.build().toUri();
@@ -132,10 +137,12 @@ public class RouteToRequestUrlFilterTests {
 		ServerWebExchange webExchange = testFilter(request, "http://myhost");
 		URI uri = webExchange.getRequiredAttribute(GATEWAY_REQUEST_URL_ATTR);
 		assertThat(uri).hasScheme("http").hasHost("myhost")
-				.hasParameter("key[]", "test= key").hasParameter("start", "1533108081");
+				// since https://github.com/joel-costigliola/assertj-core/issues/1699
+				// assertj uses raw query
+				.hasParameter("key[]", "test=%20key").hasParameter("start", "1533108081");
 
 		// prove that it is double encoded since partial encoded uri is treated as
-		// uncoded.
+		// unencoded.
 		assertThat(uri.getRawQuery()).isEqualTo("key[]=test=%2520key&start=1533108081");
 	}
 

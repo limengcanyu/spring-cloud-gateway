@@ -25,6 +25,7 @@ import org.junit.runners.Suite.SuiteClasses;
 import org.junit.runners.model.Statement;
 
 import org.springframework.cloud.gateway.filter.GatewayMetricsFilterTests;
+import org.springframework.cloud.gateway.filter.factory.RewriteLocationResponseHeaderGatewayFilterFactoryTests;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
@@ -55,7 +56,6 @@ import static org.junit.Assume.assumeThat;
 		org.springframework.cloud.gateway.handler.predicate.CloudFoundryRouteServiceRoutePredicateFactoryTest.class,
 		org.springframework.cloud.gateway.handler.RoutePredicateHandlerMappingTests.class,
 		org.springframework.cloud.gateway.filter.factory.RewriteResponseHeaderGatewayFilterFactoryTests.class,
-		org.springframework.cloud.gateway.filter.factory.HystrixGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.SecureHeadersGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.RedirectToGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.AddRequestParameterGatewayFilterFactoryTests.class,
@@ -63,6 +63,7 @@ import static org.junit.Assume.assumeThat;
 		org.springframework.cloud.gateway.filter.factory.SetPathGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.PrefixPathGatewayFilterFactoryTest.class,
 		org.springframework.cloud.gateway.filter.factory.RewriteResponseHeaderGatewayFilterFactoryUnitTests.class,
+		RewriteLocationResponseHeaderGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.RequestRateLimiterGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.RequestHeaderToRequestUriGatewayFilterFactoryIntegrationTests.class,
 		org.springframework.cloud.gateway.filter.factory.RemoveResponseHeaderGatewayFilterFactoryTests.class,
@@ -80,6 +81,7 @@ import static org.junit.Assume.assumeThat;
 		org.springframework.cloud.gateway.filter.factory.RewritePathGatewayFilterFactoryIntegrationTests.class,
 		org.springframework.cloud.gateway.filter.factory.AddRequestHeaderGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.SetResponseHeaderGatewayFilterFactoryTests.class,
+		org.springframework.cloud.gateway.filter.factory.rewrite.ModifyResponseBodyGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.WeightCalculatorWebFilterTests.class,
 		org.springframework.cloud.gateway.filter.RouteToRequestUrlFilterTests.class,
 		org.springframework.cloud.gateway.filter.headers.ForwardedHeadersFilterTests.class,
@@ -93,7 +95,6 @@ import static org.junit.Assume.assumeThat;
 		org.springframework.cloud.gateway.filter.ratelimit.PrincipalNameKeyResolverIntegrationTests.class,
 		org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiterConfigTests.class,
 		org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiterTests.class,
-		org.springframework.cloud.gateway.filter.LoadBalancerClientFilterTests.class,
 		org.springframework.cloud.gateway.filter.NettyRoutingFilterIntegrationTests.class,
 		GatewayMetricsFilterTests.class,
 		org.springframework.cloud.gateway.filter.ForwardRoutingFilterTests.class,
@@ -108,7 +109,7 @@ import static org.junit.Assume.assumeThat;
 		org.springframework.cloud.gateway.actuate.GatewayControllerEndpointTests.class,
 		org.springframework.cloud.gateway.config.GatewayAutoConfigurationTests.class,
 		org.springframework.cloud.gateway.discovery.DiscoveryClientRouteDefinitionLocatorTests.class,
-		org.springframework.cloud.gateway.discovery.GatewayDiscoveryClientAutoConfigurationTests.class,
+		org.springframework.cloud.gateway.discovery.ReactiveGatewayDiscoveryClientAutoConfigurationTests.class,
 		org.springframework.cloud.gateway.discovery.DiscoveryClientRouteDefinitionLocatorIntegrationTests.class,
 		org.springframework.cloud.gateway.support.ShortcutConfigurableTests.class,
 		org.springframework.cloud.gateway.support.ipresolver.XForwardedRemoteAddressResolverTest.class,
@@ -117,7 +118,6 @@ import static org.junit.Assume.assumeThat;
 		org.springframework.cloud.gateway.test.ForwardTests.class,
 		org.springframework.cloud.gateway.test.PostTests.class,
 		org.springframework.cloud.gateway.test.ssl.SingleCertSSLTests.class,
-		org.springframework.cloud.gateway.test.ssl.SSLHandshakeTimeoutDeprecatedTests.class,
 		org.springframework.cloud.gateway.test.ssl.MultiCertSSLTests.class,
 		org.springframework.cloud.gateway.test.ssl.SSLHandshakeTimeoutTests.class,
 		org.springframework.cloud.gateway.test.websocket.WebSocketIntegrationTests.class,

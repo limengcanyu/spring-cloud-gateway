@@ -18,6 +18,9 @@ package org.springframework.cloud.gateway.config;
 
 import java.io.IOException;
 import java.net.URL;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchProviderException;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
@@ -27,19 +30,24 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import javax.net.ssl.KeyManagerFactory;
+import javax.validation.constraints.Max;
+
 import reactor.netty.resources.ConnectionProvider;
 import reactor.netty.tcp.SslProvider;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.DeprecatedConfigurationProperty;
 import org.springframework.boot.web.server.WebServerException;
 import org.springframework.core.style.ToStringCreator;
 import org.springframework.util.ResourceUtils;
+import org.springframework.util.unit.DataSize;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * Configuration properties for the Netty {@link reactor.netty.http.client.HttpClient}.
  */
 @ConfigurationProperties("spring.cloud.gateway.httpclient")
+@Validated
 public class HttpClientProperties {
 
 	/** The connect timeout in millis, the default is 45s. */
@@ -47,6 +55,12 @@ public class HttpClientProperties {
 
 	/** The response timeout. */
 	private Duration responseTimeout;
+
+	/** The max response header size. */
+	private DataSize maxHeaderSize;
+
+	/** The max initial line length. */
+	private DataSize maxInitialLineLength;
 
 	/** Pool configuration for Netty HttpClient. */
 	private Pool pool = new Pool();
@@ -59,6 +73,9 @@ public class HttpClientProperties {
 
 	/** Websocket configuration for Netty HttpClient. */
 	private Websocket websocket = new Websocket();
+
+	/** Enables wiretap debugging for Netty HttpClient. */
+	private boolean wiretap;
 
 	public Integer getConnectTimeout() {
 		return connectTimeout;
@@ -74,6 +91,24 @@ public class HttpClientProperties {
 
 	public void setResponseTimeout(Duration responseTimeout) {
 		this.responseTimeout = responseTimeout;
+	}
+
+	@Max(Integer.MAX_VALUE)
+	public DataSize getMaxHeaderSize() {
+		return maxHeaderSize;
+	}
+
+	public void setMaxHeaderSize(DataSize maxHeaderSize) {
+		this.maxHeaderSize = maxHeaderSize;
+	}
+
+	@Max(Integer.MAX_VALUE)
+	public DataSize getMaxInitialLineLength() {
+		return maxInitialLineLength;
+	}
+
+	public void setMaxInitialLineLength(DataSize maxInitialLineLength) {
+		this.maxInitialLineLength = maxInitialLineLength;
 	}
 
 	public Pool getPool() {
@@ -108,16 +143,27 @@ public class HttpClientProperties {
 		this.websocket = websocket;
 	}
 
+	public boolean isWiretap() {
+		return this.wiretap;
+	}
+
+	public void setWiretap(boolean wiretap) {
+		this.wiretap = wiretap;
+	}
+
 	@Override
 	public String toString() {
 		// @formatter:off
 		return new ToStringCreator(this)
 				.append("connectTimeout", connectTimeout)
 				.append("responseTimeout", responseTimeout)
+				.append("maxHeaderSize", maxHeaderSize)
+				.append("maxInitialLineLength", maxInitialLineLength)
 				.append("pool", pool)
 				.append("proxy", proxy)
 				.append("ssl", ssl)
 				.append("websocket", websocket)
+				.append("wiretap", wiretap)
 				.toString();
 		// @formatter:on
 
@@ -139,6 +185,18 @@ public class HttpClientProperties {
 
 		/** Only for type FIXED, the maximum time in millis to wait for aquiring. */
 		private Long acquireTimeout = ConnectionProvider.DEFAULT_POOL_ACQUIRE_TIMEOUT;
+
+		/**
+		 * Time in millis after which the channel will be closed. If NULL, there is no max
+		 * idle time.
+		 */
+		private Duration maxIdleTime = null;
+
+		/**
+		 * Duration after which the channel will be closed. If NULL, there is no max life
+		 * time.
+		 */
+		private Duration maxLifeTime = null;
 
 		public PoolType getType() {
 			return type;
@@ -172,11 +230,28 @@ public class HttpClientProperties {
 			this.acquireTimeout = acquireTimeout;
 		}
 
+		public Duration getMaxIdleTime() {
+			return maxIdleTime;
+		}
+
+		public void setMaxIdleTime(Duration maxIdleTime) {
+			this.maxIdleTime = maxIdleTime;
+		}
+
+		public Duration getMaxLifeTime() {
+			return maxLifeTime;
+		}
+
+		public void setMaxLifeTime(Duration maxLifeTime) {
+			this.maxLifeTime = maxLifeTime;
+		}
+
 		@Override
 		public String toString() {
 			return "Pool{" + "type=" + type + ", name='" + name + '\''
 					+ ", maxConnections=" + maxConnections + ", acquireTimeout="
-					+ acquireTimeout + '}';
+					+ acquireTimeout + ", maxIdleTime=" + maxIdleTime + ", maxLifeTime="
+					+ maxLifeTime + '}';
 		}
 
 		public enum PoolType {
@@ -200,7 +275,7 @@ public class HttpClientProperties {
 
 	}
 
-	public class Proxy {
+	public static class Proxy {
 
 		/** Hostname for proxy configuration of Netty HttpClient. */
 		private String host;
@@ -269,7 +344,7 @@ public class HttpClientProperties {
 
 	}
 
-	public class Ssl {
+	public static class Ssl {
 
 		/**
 		 * Installs the netty InsecureTrustManagerFactory. This is insecure and not
@@ -293,6 +368,61 @@ public class HttpClientProperties {
 		/** The default ssl configuration type. Defaults to TCP. */
 		private SslProvider.DefaultConfigurationType defaultConfigurationType = SslProvider.DefaultConfigurationType.TCP;
 
+		/** Keystore path for Netty HttpClient. */
+		private String keyStore;
+
+		/** Keystore type for Netty HttpClient, default is JKS. */
+		private String keyStoreType = "JKS";
+
+		/** Keystore provider for Netty HttpClient, optional field. */
+		private String keyStoreProvider;
+
+		/** Keystore password. */
+		private String keyStorePassword;
+
+		/** Key password, default is same as keyStorePassword. */
+		private String keyPassword;
+
+		public String getKeyStorePassword() {
+			return keyStorePassword;
+		}
+
+		public void setKeyStorePassword(String keyStorePassword) {
+			this.keyStorePassword = keyStorePassword;
+		}
+
+		public String getKeyStoreType() {
+			return keyStoreType;
+		}
+
+		public void setKeyStoreType(String keyStoreType) {
+			this.keyStoreType = keyStoreType;
+		}
+
+		public String getKeyStoreProvider() {
+			return keyStoreProvider;
+		}
+
+		public void setKeyStoreProvider(String keyStoreProvider) {
+			this.keyStoreProvider = keyStoreProvider;
+		}
+
+		public String getKeyStore() {
+			return keyStore;
+		}
+
+		public void setKeyStore(String keyStore) {
+			this.keyStore = keyStore;
+		}
+
+		public String getKeyPassword() {
+			return keyPassword;
+		}
+
+		public void setKeyPassword(String keyPassword) {
+			this.keyPassword = keyPassword;
+		}
+
 		public List<String> getTrustedX509Certificates() {
 			return trustedX509Certificates;
 		}
@@ -306,7 +436,7 @@ public class HttpClientProperties {
 				CertificateFactory certificateFactory = CertificateFactory
 						.getInstance("X.509");
 				ArrayList<Certificate> allCerts = new ArrayList<>();
-				for (String trustedCert : ssl.getTrustedX509Certificates()) {
+				for (String trustedCert : getTrustedX509Certificates()) {
 					try {
 						URL url = ResourceUtils.getURL(trustedCert);
 						Collection<? extends Certificate> certs = certificateFactory
@@ -323,6 +453,53 @@ public class HttpClientProperties {
 			catch (CertificateException e1) {
 				throw new WebServerException("Could not load CertificateFactory X.509",
 						e1);
+			}
+		}
+
+		public KeyManagerFactory getKeyManagerFactory() {
+			try {
+				if (getKeyStore() != null && getKeyStore().length() > 0) {
+					KeyManagerFactory keyManagerFactory = KeyManagerFactory
+							.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+					char[] keyPassword = getKeyPassword() != null
+							? getKeyPassword().toCharArray() : null;
+
+					if (keyPassword == null && getKeyStorePassword() != null) {
+						keyPassword = getKeyStorePassword().toCharArray();
+					}
+
+					keyManagerFactory.init(this.createKeyStore(), keyPassword);
+
+					return keyManagerFactory;
+				}
+
+				return null;
+			}
+			catch (Exception e) {
+				throw new IllegalStateException(e);
+			}
+		}
+
+		public KeyStore createKeyStore() {
+			try {
+				KeyStore store = getKeyStoreProvider() != null
+						? KeyStore.getInstance(getKeyStoreType(), getKeyStoreProvider())
+						: KeyStore.getInstance(getKeyStoreType());
+				try {
+					URL url = ResourceUtils.getURL(getKeyStore());
+					store.load(url.openStream(), getKeyStorePassword() != null
+							? getKeyStorePassword().toCharArray() : null);
+				}
+				catch (Exception e) {
+					throw new WebServerException(
+							"Could not load key store ' " + getKeyStore() + "'", e);
+				}
+
+				return store;
+			}
+			catch (KeyStoreException | NoSuchProviderException e) {
+				throw new WebServerException(
+						"Could not load KeyStore for given type and provider", e);
 			}
 		}
 
@@ -360,42 +537,6 @@ public class HttpClientProperties {
 			this.closeNotifyReadTimeout = closeNotifyReadTimeout;
 		}
 
-		@DeprecatedConfigurationProperty(
-				replacement = "spring.cloud.gateway.httpclient.ssl.handshake-timeout")
-		@Deprecated
-		public long getHandshakeTimeoutMillis() {
-			return getHandshakeTimeout().toMillis();
-		}
-
-		@Deprecated
-		public void setHandshakeTimeoutMillis(long handshakeTimeoutMillis) {
-			setHandshakeTimeout(Duration.ofMillis(handshakeTimeoutMillis));
-		}
-
-		@DeprecatedConfigurationProperty(
-				replacement = "spring.cloud.gateway.httpclient.ssl.close-notify-flush-timeout")
-		@Deprecated
-		public long getCloseNotifyFlushTimeoutMillis() {
-			return getCloseNotifyFlushTimeout().toMillis();
-		}
-
-		@Deprecated
-		public void setCloseNotifyFlushTimeoutMillis(long closeNotifyFlushTimeoutMillis) {
-			setCloseNotifyFlushTimeout(Duration.ofMillis(closeNotifyFlushTimeoutMillis));
-		}
-
-		@DeprecatedConfigurationProperty(
-				replacement = "spring.cloud.gateway.httpclient.ssl.close-notify-read-timeout")
-		@Deprecated
-		public long getCloseNotifyReadTimeoutMillis() {
-			return getCloseNotifyReadTimeout().toMillis();
-		}
-
-		@Deprecated
-		public void setCloseNotifyReadTimeoutMillis(long closeNotifyReadTimeoutMillis) {
-			setCloseNotifyFlushTimeout(Duration.ofMillis(closeNotifyReadTimeoutMillis));
-		}
-
 		public SslProvider.DefaultConfigurationType getDefaultConfigurationType() {
 			return defaultConfigurationType;
 		}
@@ -419,10 +560,13 @@ public class HttpClientProperties {
 
 	}
 
-	public class Websocket {
+	public static class Websocket {
 
 		/** Max frame payload length. */
 		private Integer maxFramePayloadLength;
+
+		/** Proxy ping frames to downstream services, defaults to true. */
+		private boolean proxyPing = true;
 
 		public Integer getMaxFramePayloadLength() {
 			return this.maxFramePayloadLength;
@@ -432,10 +576,19 @@ public class HttpClientProperties {
 			this.maxFramePayloadLength = maxFramePayloadLength;
 		}
 
+		public boolean isProxyPing() {
+			return proxyPing;
+		}
+
+		public void setProxyPing(boolean proxyPing) {
+			this.proxyPing = proxyPing;
+		}
+
 		@Override
 		public String toString() {
 			return new ToStringCreator(this)
-					.append("maxFramePayloadLength", maxFramePayloadLength).toString();
+					.append("maxFramePayloadLength", maxFramePayloadLength)
+					.append("proxyPing", proxyPing).toString();
 		}
 
 	}

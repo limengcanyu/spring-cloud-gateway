@@ -52,6 +52,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.util.ClassUtils;
+import org.springframework.util.StringUtils;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -228,14 +229,23 @@ public class ProxyExchange<T> {
 	 * @param uri the backend uri to send the request to
 	 * @return this for convenience
 	 */
+	public ProxyExchange<T> uri(URI uri) {
+		this.uri = uri;
+		return this;
+	}
+
+	/**
+	 * Sets the uri for the backend call when triggered by the HTTP methods.
+	 * @param uri the backend uri to send the request to
+	 * @return this for convenience
+	 */
 	public ProxyExchange<T> uri(String uri) {
 		try {
-			this.uri = new URI(uri);
+			return this.uri(new URI(uri));
 		}
 		catch (URISyntaxException e) {
 			throw new IllegalStateException("Cannot create URI", e);
 		}
-		return this;
 	}
 
 	public String path() {
@@ -312,8 +322,8 @@ public class ProxyExchange<T> {
 	}
 
 	public ResponseEntity<T> delete() {
-		RequestEntity<Void> requestEntity = headers(
-				(BodyBuilder) RequestEntity.delete(uri)).build();
+		RequestEntity<Object> requestEntity = headers(
+				(BodyBuilder) RequestEntity.delete(uri)).body(body());
 		return exchange(requestEntity);
 	}
 
@@ -405,11 +415,14 @@ public class ProxyExchange<T> {
 		else {
 			forwarded = "";
 		}
-		forwarded = forwarded + forwarded(uri);
+		forwarded = forwarded + forwarded(uri, webRequest.getHeader("host"));
 		headers.set("forwarded", forwarded);
 	}
 
-	private String forwarded(URI uri) {
+	private String forwarded(URI uri, String hostHeader) {
+		if (!StringUtils.isEmpty(hostHeader)) {
+			return "host=" + hostHeader;
+		}
 		if ("http".equals(uri.getScheme())) {
 			return "host=" + uri.getHost();
 		}
@@ -453,7 +466,7 @@ public class ProxyExchange<T> {
 
 	protected static class BodyGrabber {
 
-		public Object body(@RequestBody Object body) {
+		public Object body(@RequestBody(required = false) Object body) {
 			return body;
 		}
 
