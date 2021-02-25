@@ -95,6 +95,7 @@ public class GatewayAutoConfigurationTests {
 						"spring.cloud.gateway.httpclient.connect-timeout=10",
 						"spring.cloud.gateway.httpclient.response-timeout=10s",
 						"spring.cloud.gateway.httpclient.pool.type=fixed",
+						"spring.cloud.gateway.httpclient.compression=true",
 						// greather than integer max value
 						"spring.cloud.gateway.httpclient.max-initial-line-length=2147483647",
 						"spring.cloud.gateway.httpclient.proxy.host=myhost",
@@ -104,6 +105,7 @@ public class GatewayAutoConfigurationTests {
 					HttpClient httpClient = context.getBean(HttpClient.class);
 					HttpClientProperties properties = context.getBean(HttpClientProperties.class);
 					assertThat(properties.getMaxInitialLineLength().toBytes()).isLessThanOrEqualTo(Integer.MAX_VALUE);
+					assertThat(properties.isCompression()).isEqualTo(true);
 					/*
 					 * FIXME: 2.1.0 HttpClientOptions options = httpClient.options();
 					 *
@@ -123,11 +125,11 @@ public class GatewayAutoConfigurationTests {
 					assertThat(context).hasSingleBean(ReactorNettyRequestUpgradeStrategy.class);
 					ReactorNettyRequestUpgradeStrategy upgradeStrategy = context
 							.getBean(ReactorNettyRequestUpgradeStrategy.class);
-					assertThat(upgradeStrategy.getMaxFramePayloadLength()).isEqualTo(1024);
-					assertThat(upgradeStrategy.getHandlePing()).isTrue();
+					assertThat(upgradeStrategy.getWebsocketServerSpec().maxFramePayloadLength()).isEqualTo(1024);
+					assertThat(upgradeStrategy.getWebsocketServerSpec().handlePing()).isTrue();
 					assertThat(context).hasSingleBean(ReactorNettyWebSocketClient.class);
 					ReactorNettyWebSocketClient webSocketClient = context.getBean(ReactorNettyWebSocketClient.class);
-					assertThat(webSocketClient.getMaxFramePayloadLength()).isEqualTo(1024);
+					assertThat(webSocketClient.getWebsocketClientSpec().maxFramePayloadLength()).isEqualTo(1024);
 					HttpClientCustomizedConfig config = context.getBean(HttpClientCustomizedConfig.class);
 					assertThat(config.called.get()).isTrue();
 				});
